@@ -1429,11 +1429,29 @@ impl<'a, 'gcc, 'tcx> Builder<'a, 'gcc, 'tcx> {
         unimplemented!();
     }
 
+    #[cfg(feature="master")]
     pub fn vector_reduce_fadd(&mut self, acc: RValue<'gcc>, src: RValue<'gcc>) -> RValue<'gcc> {
         let vector_type = src.get_type().unqualified().dyncast_vector().expect("vector type");
         let element_count = vector_type.get_num_units();
         (0..element_count).into_iter()
-            .map(|i| self.context.new_vector_access(None, src, self.context.new_rvalue_from_int(self.int_type, i as _)).to_rvalue())
+            .map(|i| self.context
+                .new_vector_access(None, src, self.context.new_rvalue_from_int(self.int_type, i as _))
+                .to_rvalue())
+            .fold(acc, |x, i| x + i)
+    }
+
+    // TODO(sadlerap): remove this specialization when new_vector_access stabilizes in gccjit
+    #[cfg(not(feature="master"))]
+    pub fn vector_reduce_fadd(&mut self, acc: RValue<'gcc>, src: RValue<'gcc>) -> RValue<'gcc> {
+        let vector_type = src.get_type().unqualified().dyncast_vector().expect("vector type");
+        let element_count = vector_type.get_num_units();
+        let element_type = vector_type.get_element_type();
+        let array_type = self.context.new_array_type(None, element_type, element_count as _);
+        let data = self.context.new_bitcast(None, src, array_type);
+        (0..element_count).into_iter()
+            .map(|i| self.context
+                .new_array_access(None, data, self.context.new_rvalue_from_int(self.int_type, i as _))
+                .to_rvalue())
             .fold(acc, |x, i| x + i)
     }
 
@@ -1441,11 +1459,29 @@ impl<'a, 'gcc, 'tcx> Builder<'a, 'gcc, 'tcx> {
         unimplemented!();
     }
 
+    #[cfg(feature="master")]
     pub fn vector_reduce_fmul(&mut self, acc: RValue<'gcc>, src: RValue<'gcc>) -> RValue<'gcc> {
         let vector_type = src.get_type().unqualified().dyncast_vector().expect("vector type");
         let element_count = vector_type.get_num_units();
         (0..element_count).into_iter()
-            .map(|i| self.context.new_vector_access(None, src, self.context.new_rvalue_from_int(self.int_type, i as _)).to_rvalue())
+            .map(|i| self.context
+                .new_vector_access(None, src, self.context.new_rvalue_from_int(self.int_type, i as _))
+                .to_rvalue())
+            .fold(acc, |x, i| x * i)
+    }
+
+    // TODO(sadlerap): remove this specialization when new_vector_access stabilizes in gccjit
+    #[cfg(not(feature="master"))]
+    pub fn vector_reduce_fmul(&mut self, acc: RValue<'gcc>, src: RValue<'gcc>) -> RValue<'gcc> {
+        let vector_type = src.get_type().unqualified().dyncast_vector().expect("vector type");
+        let element_count = vector_type.get_num_units();
+        let element_type = vector_type.get_element_type();
+        let array_type = self.context.new_array_type(None, element_type, element_count as _);
+        let src = self.context.new_bitcast(None, src, array_type);
+        (0..element_count).into_iter()
+            .map(|i| self.context
+                .new_array_access(None, src, self.context.new_rvalue_from_int(self.int_type, i as _))
+                .to_rvalue())
             .fold(acc, |x, i| x * i)
     }
 
@@ -1465,6 +1501,7 @@ impl<'a, 'gcc, 'tcx> Builder<'a, 'gcc, 'tcx> {
         })
     }
 
+    #[cfg(feature="master")]
     pub fn vector_reduce_fmin(&mut self, src: RValue<'gcc>) -> RValue<'gcc> {
         let vector_type = src.get_type().unqualified().dyncast_vector().expect("vector type");
         let element_count = vector_type.get_num_units();
@@ -1479,6 +1516,26 @@ impl<'a, 'gcc, 'tcx> Builder<'a, 'gcc, 'tcx> {
         acc
     }
 
+    // TODO(sadlerap): remove this specialization when new_vector_access stabilizes in gccjit
+    #[cfg(not(feature="master"))]
+    pub fn vector_reduce_fmin(&mut self, src: RValue<'gcc>) -> RValue<'gcc> {
+        let vector_type = src.get_type().unqualified().dyncast_vector().expect("vector type");
+        let element_count = vector_type.get_num_units();
+        let element_type = vector_type.get_element_type();
+        let array_type = self.context.new_array_type(None, element_type, element_count as _);
+        let src = self.context.new_bitcast(None, src, array_type);
+        let mut acc = self.context.new_array_access(None, src, self.context.new_rvalue_zero(self.int_type)).to_rvalue();
+        for i in (1..element_count).into_iter() {
+            let elem = self.context
+                .new_array_access(None, src, self.context.new_rvalue_from_int(self.int_type, i as _))
+                .to_rvalue();
+            let cmp = self.context.new_comparison(None, ComparisonOp::LessThan, acc, elem);
+            acc = self.select(cmp, acc, elem);
+        }
+        acc
+    }
+
+    #[cfg(feature="master")]
     pub fn vector_reduce_fmax(&mut self, src: RValue<'gcc>) -> RValue<'gcc> {
         let vector_type = src.get_type().unqualified().dyncast_vector().expect("vector type");
         let element_count = vector_type.get_num_units();
@@ -1492,6 +1549,26 @@ impl<'a, 'gcc, 'tcx> Builder<'a, 'gcc, 'tcx> {
         }
         acc
     }
+
+    // TODO(sadlerap): remove this specialization when new_vector_access stabilizes in gccjit
+    #[cfg(not(feature="master"))]
+    pub fn vector_reduce_fmax(&mut self, src: RValue<'gcc>) -> RValue<'gcc> {
+        let vector_type = src.get_type().unqualified().dyncast_vector().expect("vector type");
+        let element_count = vector_type.get_num_units();
+        let element_type = vector_type.get_element_type();
+        let array_type = self.context.new_array_type(None, element_type, element_count as _);
+        let src = self.context.new_bitcast(None, src, array_type);
+        let mut acc = self.context.new_array_access(None, src, self.context.new_rvalue_zero(self.int_type)).to_rvalue();
+        for i in (1..element_count).into_iter() {
+            let elem = self.context
+                .new_array_access(None, src, self.context.new_rvalue_from_int(self.int_type, i as _))
+                .to_rvalue();
+            let cmp = self.context.new_comparison(None, ComparisonOp::GreaterThan, acc, elem);
+            acc = self.select(cmp, acc, elem);
+        }
+        acc
+    }
+
 
     pub fn vector_select(&mut self, cond: RValue<'gcc>, then_val: RValue<'gcc>, else_val: RValue<'gcc>) -> RValue<'gcc> {
         // cond is a vector of integers, not of bools.
