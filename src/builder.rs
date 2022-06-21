@@ -1502,6 +1502,50 @@ impl<'a, 'gcc, 'tcx> Builder<'a, 'gcc, 'tcx> {
     }
 
     #[cfg(feature="master")]
+    pub fn vector_reduce_fmin_nanless(&mut self, src: RValue<'gcc>) -> RValue<'gcc> {
+        let vector_type = src.get_type().unqualified().dyncast_vector().expect("vector type");
+        let element_type = vector_type.get_element_type();
+        let mask_element_type = self.type_ix(element_type.get_size() as u64 * 8);
+        let element_count = vector_type.get_num_units();
+        let mut vector_elements = vec![];
+        for i in 0..element_count {
+            vector_elements.push(i);
+        }
+        let mask_type = self.context.new_vector_type(mask_element_type, element_count as u64);
+        let mut shift = 1;
+        let mut res = src;
+        while shift < element_count {
+            let vector_elements: Vec<_> =
+                vector_elements.iter()
+                    .map(|i| self.context.new_rvalue_from_int(mask_element_type, ((i + shift) % element_count) as i32))
+                    .collect();
+            let mask = self.context.new_rvalue_from_vector(None, mask_type, &vector_elements);
+            let shifted = self.context.new_rvalue_vector_perm(None, res, res, mask);
+            shift *= 2;
+            let a = res;
+            let b = shifted;
+            res = {
+                let mut result = Vec::with_capacity(vector_elements.len());
+                for i in 0..vector_elements.len() {
+                    let index = self.context.new_rvalue_from_long(mask_element_type, i as _);
+                    let x = self.context.new_vector_access(None, a, index).to_rvalue();
+                    let y = self.context.new_vector_access(None, b, index).to_rvalue();
+                    let cmp = self.context.new_comparison(None, ComparisonOp::LessThan, x, y);
+                    result.push(self.select(cmp, x, y));
+                }
+                self.context.new_rvalue_from_vector(None, src.get_type(), &result)
+            };
+        }
+        self.context.new_vector_access(None, res, self.context.new_rvalue_zero(self.int_type))
+            .to_rvalue()
+    }
+
+    #[cfg(not(feature="master"))]
+    pub fn vector_reduce_fmin_nanless(&mut self, _src: RValue<'gcc>) -> RValue<'gcc> {
+        unimplemented!()
+    }
+
+    #[cfg(feature="master")]
     pub fn vector_reduce_fmax(&mut self, src: RValue<'gcc>) -> RValue<'gcc> {
         let vector_type = src.get_type().unqualified().dyncast_vector().expect("vector type");
         let element_count = vector_type.get_num_units();
@@ -1521,6 +1565,49 @@ impl<'a, 'gcc, 'tcx> Builder<'a, 'gcc, 'tcx> {
         unimplemented!();
     }
 
+    #[cfg(feature="master")]
+    pub fn vector_reduce_fmax_nanless(&mut self, src: RValue<'gcc>) -> RValue<'gcc> {
+        let vector_type = src.get_type().unqualified().dyncast_vector().expect("vector type");
+        let element_type = vector_type.get_element_type();
+        let mask_element_type = self.type_ix(element_type.get_size() as u64 * 8);
+        let element_count = vector_type.get_num_units();
+        let mut vector_elements = vec![];
+        for i in 0..element_count {
+            vector_elements.push(i);
+        }
+        let mask_type = self.context.new_vector_type(mask_element_type, element_count as u64);
+        let mut shift = 1;
+        let mut res = src;
+        while shift < element_count {
+            let vector_elements: Vec<_> =
+                vector_elements.iter()
+                    .map(|i| self.context.new_rvalue_from_int(mask_element_type, ((i + shift) % element_count) as i32))
+                    .collect();
+            let mask = self.context.new_rvalue_from_vector(None, mask_type, &vector_elements);
+            let shifted = self.context.new_rvalue_vector_perm(None, res, res, mask);
+            shift *= 2;
+            let a = res;
+            let b = shifted;
+            res = {
+                let mut result = Vec::with_capacity(vector_elements.len());
+                for i in 0..vector_elements.len() {
+                    let index = self.context.new_rvalue_from_long(mask_element_type, i as _);
+                    let x = self.context.new_vector_access(None, a, index).to_rvalue();
+                    let y = self.context.new_vector_access(None, b, index).to_rvalue();
+                    let cmp = self.context.new_comparison(None, ComparisonOp::GreaterThan, x, y);
+                    result.push(self.select(cmp, x, y));
+                }
+                self.context.new_rvalue_from_vector(None, src.get_type(), &result)
+            };
+        }
+        self.context.new_vector_access(None, res, self.context.new_rvalue_zero(self.int_type))
+            .to_rvalue()
+    }
+
+    #[cfg(not(feature="master"))]
+    pub fn vector_reduce_fmax_nanless(&mut self, _src: RValue<'gcc>) -> RValue<'gcc> {
+        unimplemented!()
+    }
 
     pub fn vector_select(&mut self, cond: RValue<'gcc>, then_val: RValue<'gcc>, else_val: RValue<'gcc>) -> RValue<'gcc> {
         // cond is a vector of integers, not of bools.

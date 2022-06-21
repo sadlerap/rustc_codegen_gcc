@@ -714,8 +714,8 @@ pub fn generic_simd_intrinsic<'a, 'gcc, 'tcx>(bx: &mut Builder<'a, 'gcc, 'tcx>, 
     minmax_red!(simd_reduce_min: vector_reduce_min, vector_reduce_fmin);
     minmax_red!(simd_reduce_max: vector_reduce_max, vector_reduce_fmax);
     // TODO(sadlerap): revisit these intrinsics to generate more optimal reductions
-    minmax_red!(simd_reduce_min_nanless: vector_reduce_min, vector_reduce_fmin);
-    minmax_red!(simd_reduce_max_nanless: vector_reduce_max, vector_reduce_fmax);
+    minmax_red!(simd_reduce_min_nanless: vector_reduce_min, vector_reduce_fmin_nanless);
+    minmax_red!(simd_reduce_max_nanless: vector_reduce_max, vector_reduce_fmax_nanless);
 
     macro_rules! bitwise_red {
         ($name:ident : $op:expr, $boolean:expr) => {
@@ -770,3 +770,4 @@ pub fn generic_simd_intrinsic<'a, 'gcc, 'tcx>(bx: &mut Builder<'a, 'gcc, 'tcx>, 
 
     unimplemented!("simd {}", name);
 }
+
