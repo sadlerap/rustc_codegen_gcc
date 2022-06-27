@@ -1558,6 +1558,23 @@ impl<'a, 'gcc, 'tcx> Builder<'a, 'gcc, 'tcx> {
     }
 
     #[cfg(feature="master")]
+    pub fn vector_reduce_fmin_nanless(&mut self, src: RValue<'gcc>) -> RValue<'gcc> {
+        self.vector_reduce(src, |a, b, context| {
+            let mask = context.new_comparison(None, ComparisonOp::LessThan, a, b);
+            let a_bitcast = context.new_bitcast(None, a, mask.get_type());
+            let b_bitcast = context.new_bitcast(None, b, mask.get_type());
+            let mask_inverted = context.new_unary_op(None, UnaryOp::BitwiseNegate, mask.get_type(), mask);
+            let res = (a_bitcast & mask) | (b_bitcast & mask_inverted);
+            context.new_bitcast(None, res, a.get_type())
+        })
+    }
+
+    #[cfg(not(feature="master"))]
+    pub fn vector_reduce_fmin_nanless(&mut self, _src: RValue<'gcc>) -> RValue<'gcc> {
+        unimplemented!()
+    }
+
+    #[cfg(feature="master")]
     pub fn vector_reduce_fmax(&mut self, src: RValue<'gcc>) -> RValue<'gcc> {
         let vector_type = src.get_type().unqualified().dyncast_vector().expect("vector type");
         let element_count = vector_type.get_num_units();
@@ -1577,6 +1594,22 @@ impl<'a, 'gcc, 'tcx> Builder<'a, 'gcc, 'tcx> {
         unimplemented!();
     }
 
+    #[cfg(feature="master")]
+    pub fn vector_reduce_fmax_nanless(&mut self, src: RValue<'gcc>) -> RValue<'gcc> {
+        self.vector_reduce(src, |a, b, context| {
+            let mask = context.new_comparison(None, ComparisonOp::GreaterThan, a, b);
+            let a_bitcast = context.new_bitcast(None, a, mask.get_type());
+            let b_bitcast = context.new_bitcast(None, b, mask.get_type());
+            let mask_inverted = context.new_unary_op(None, UnaryOp::BitwiseNegate, mask.get_type(), mask);
+            let res = (a_bitcast & mask) | (b_bitcast & mask_inverted);
+            context.new_bitcast(None, res, a.get_type())
+        })
+    }
+
+    #[cfg(not(feature="master"))]
+    pub fn vector_reduce_fmax_nanless(&mut self, _src: RValue<'gcc>) -> RValue<'gcc> {
+        unimplemented!()
+    }
 
     pub fn vector_select(&mut self, cond: RValue<'gcc>, then_val: RValue<'gcc>, else_val: RValue<'gcc>) -> RValue<'gcc> {
         // cond is a vector of integers, not of bools.
