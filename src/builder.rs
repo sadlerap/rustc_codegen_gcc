@@ -1532,6 +1532,51 @@ impl<'a, 'gcc, 'tcx> Builder<'a, 'gcc, 'tcx> {
     }
 
     #[cfg(feature="master")]
+    pub fn vector_reduce_fmin_nanless(&mut self, src: RValue<'gcc>) -> RValue<'gcc> {
+        let vector_type = src.get_type().unqualified().dyncast_vector().expect("vector type");
+        let element_type = vector_type.get_element_type();
+        let element_count = vector_type.get_num_units();
+        let mask_element_type = self.type_ix(element_type.get_size() as u64 * 8);
+
+        let mut vector_width = element_count;
+        assert!(vector_width.is_power_of_two());
+
+        let mut res = src;
+        while vector_width != 2 {
+            let half_width = vector_width / 2;
+            let half_vector_type = self.context.new_vector_type(element_type, half_width as _);
+            let trunc = |range: std::ops::Range<usize>| {
+                let vector_rvalues = range.into_iter()
+                    .map(|i| self.context.new_rvalue_from_long(self.int_type, i as _))
+                    .map(|r| self.context.new_vector_access(None, res, r).to_rvalue())
+                    .collect::<Vec<_>>();
+                self.context.new_rvalue_from_vector(None, half_vector_type, &vector_rvalues)
+            };
+
+            let bottom_half = trunc(0..half_width);
+            let top_half = trunc(half_width..vector_width);
+            let cmp = self.context.new_comparison(None, ComparisonOp::LessThan, bottom_half, top_half);
+            let bitcast_type = self.context.new_vector_type(mask_element_type, half_width as _);
+            let a = self.context.new_bitcast(None, bottom_half, bitcast_type);
+            let b = self.context.new_bitcast(None, top_half, bitcast_type);
+            res = self.context.new_bitcast(
+                None,
+                self.simple_vector_select(cmp, a, b),
+                half_vector_type);
+            vector_width = half_width;
+        }
+        let a = self.context.new_vector_access(None, res, self.context.new_rvalue_zero(mask_element_type)).to_rvalue();
+        let b = self.context.new_vector_access(None, res, self.context.new_rvalue_one(mask_element_type)).to_rvalue();
+        let cmp = self.context.new_comparison(None, ComparisonOp::LessThan, a, b);
+        self.select(cmp, a, b)
+    }
+
+    #[cfg(not(feature="master"))]
+    pub fn vector_reduce_fmin_nanless(&mut self, _src: RValue<'gcc>) -> RValue<'gcc> {
+        unimplemented!();
+    }
+
+    #[cfg(feature="master")]
     pub fn vector_reduce_fmax(&mut self, src: RValue<'gcc>) -> RValue<'gcc> {
         let vector_type = src.get_type().unqualified().dyncast_vector().expect("vector type");
         let element_count = vector_type.get_num_units();
@@ -1551,22 +1596,75 @@ impl<'a, 'gcc, 'tcx> Builder<'a, 'gcc, 'tcx> {
         unimplemented!();
     }
 
+    #[cfg(feature="master")]
+    pub fn vector_reduce_fmax_nanless(&mut self, src: RValue<'gcc>) -> RValue<'gcc> {
+        let vector_type = src.get_type().unqualified().dyncast_vector().expect("vector type");
+        let element_type = vector_type.get_element_type();
+        let element_count = vector_type.get_num_units();
+        let mask_element_type = self.type_ix(element_type.get_size() as u64 * 8);
+
+        let mut vector_width = element_count;
+        assert!(vector_width.is_power_of_two());
+
+        let mut res = src;
+        while vector_width != 2 {
+            let half_width = vector_width / 2;
+            let half_vector_type = self.context.new_vector_type(element_type, half_width as _);
+            let trunc = |range: std::ops::Range<usize>| {
+                let vector_rvalues = range.into_iter()
+                    .map(|i| self.context.new_rvalue_from_long(self.int_type, i as _))
+                    .map(|r| self.context.new_vector_access(None, res, r).to_rvalue())
+                    .collect::<Vec<_>>();
+                self.context.new_rvalue_from_vector(None, half_vector_type, &vector_rvalues)
+            };
+
+            let bottom_half = trunc(0..half_width);
+            let top_half = trunc(half_width..vector_width);
+            let cmp = self.context.new_comparison(None, ComparisonOp::GreaterThan, bottom_half, top_half);
+            let bitcast_type = self.context.new_vector_type(mask_element_type, half_width as _);
+            let a = self.context.new_bitcast(None, bottom_half, bitcast_type);
+            let b = self.context.new_bitcast(None, top_half, bitcast_type);
+            res = self.context.new_bitcast(
+                None,
+                self.simple_vector_select(cmp, a, b),
+                half_vector_type);
+            vector_width = half_width;
+        }
+        let a = self.context.new_vector_access(None, res, self.context.new_rvalue_zero(mask_element_type)).to_rvalue();
+        let b = self.context.new_vector_access(None, res, self.context.new_rvalue_one(mask_element_type)).to_rvalue();
+        let cmp = self.context.new_comparison(None, ComparisonOp::GreaterThan, a, b);
+        self.select(cmp, a, b)
+    }
+
+    #[cfg(not(feature="master"))]
+    pub fn vector_reduce_fmax_nanless(&mut self, _src: RValue<'gcc>) -> RValue<'gcc> {
+        unimplemented!();
+    }
+
+    pub fn simple_vector_select(&mut self, mask: RValue<'gcc>, then_val: RValue<'gcc>, else_val: RValue<'gcc>) -> RValue<'gcc> {
+        let mask_type = mask.get_type();
+        let inverted_mask = self.context.new_unary_op(None, UnaryOp::BitwiseNegate, mask_type, mask);
+        let then_val = self.context.new_bitcast(None, then_val, mask_type);
+        let else_val = self.context.new_bitcast(None, else_val, mask_type);
+        (mask & then_val) | (inverted_mask & else_val)
+    }
 
     pub fn vector_select(&mut self, cond: RValue<'gcc>, then_val: RValue<'gcc>, else_val: RValue<'gcc>) -> RValue<'gcc> {
         // cond is a vector of integers, not of bools.
         let cond_type = cond.get_type();
-        let vector_type = cond_type.unqualified().dyncast_vector().expect("vector type");
-        let num_units = vector_type.get_num_units();
-        let element_type = vector_type.get_element_type();
-        let zeros = vec![self.context.new_rvalue_zero(element_type); num_units];
-        let zeros = self.context.new_rvalue_from_vector(None, cond_type, &zeros);
+        // let vector_type = cond_type.unqualified().dyncast_vector().expect("vector type");
+        // let num_units = vector_type.get_num_units();
+        // let element_type = vector_type.get_element_type();
+        let zeros = self.context.new_rvalue_zero(cond_type);
 
         let masks = self.context.new_comparison(None, ComparisonOp::NotEquals, cond, zeros);
+        let then_val = self.context.new_bitcast(None, then_val, masks.get_type());
         let then_vals = masks & then_val;
 
-        let ones = vec![self.context.new_rvalue_one(element_type); num_units];
-        let ones = self.context.new_rvalue_from_vector(None, cond_type, &ones);
-        let inverted_masks = masks + ones;
+        // let ones = vec![self.context.new_rvalue_one(element_type); num_units];
+        // let ones = self.context.new_rvalue_from_vector(None, cond_type, &ones);
+        // let inverted_masks = masks + ones;
+        let inverted_masks = self.context.new_unary_op(None, UnaryOp::BitwiseNegate, masks.get_type(), masks);
         // NOTE: sometimes, the type of else_val can be different than the type of then_val in
         // libgccjit (vector of int vs vector of int32_t), but they should be the same for the AND
         // operation to work.
