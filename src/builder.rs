@@ -1417,25 +1417,29 @@ impl<'a, 'gcc, 'tcx> Builder<'a, 'gcc, 'tcx> {
         let element_type = vector_type.get_element_type();
         let mask_element_type = self.type_ix(element_type.get_size() as u64 * 8);
         let element_count = vector_type.get_num_units();
-        let mut vector_elements = vec![];
-        for i in 0..element_count {
-            vector_elements.push(i);
-        }
-        let mask_type = self.context.new_vector_type(mask_element_type, element_count as u64);
-        let mut shift = 1;
+        let mut vector_width = element_count;
+        assert!(vector_width.is_power_of_two());
+
         let mut res = src;
-        while shift < element_count {
-            let vector_elements: Vec<_> =
-                vector_elements.iter()
-                    .map(|i| self.context.new_rvalue_from_int(mask_element_type, ((i + shift) % element_count) as i32))
-                    .collect();
-            let mask = self.context.new_rvalue_from_vector(None, mask_type, &vector_elements);
-            let shifted = self.context.new_rvalue_vector_perm(None, res, res, mask);
-            shift *= 2;
-            res = op(res, shifted, &self.context);
+        while vector_width != 2 {
+            let half_width = vector_width / 2;
+            let half_vector_type = self.context.new_vector_type(element_type, half_width as _);
+            let trunc = |range: std::ops::Range<usize>| {
+                let vector_rvalues = range.into_iter()
+                    .map(|i| self.context.new_rvalue_from_long(self.int_type, i as _))
+                    .map(|r| self.context.new_vector_access(None, res, r).to_rvalue())
+                    .collect::<Vec<_>>();
+                self.context.new_rvalue_from_vector(None, half_vector_type, &vector_rvalues)
+            };
+
+            let bottom_half = trunc(0..half_width);
+            let top_half = trunc(half_width..vector_width);
+            res = op(bottom_half, top_half, &self.context);
+            vector_width = half_width;
         }
-        self.context.new_vector_access(None, res, self.context.new_rvalue_zero(self.int_type))
-            .to_rvalue()
+        let a = self.context.new_vector_access(None, res, self.context.new_rvalue_zero(mask_element_type)).to_rvalue();
+        let b = self.context.new_vector_access(None, res, self.context.new_rvalue_one(mask_element_type)).to_rvalue();
+        op(a, b, &self.context)
     }
 
     #[cfg(not(feature="master"))]
