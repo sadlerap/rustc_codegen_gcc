@@ -149,7 +149,8 @@ impl LockedTargetInfo {
     }
 
     fn supports_128bit_int(&self) -> bool {
-        self.info.lock().expect("lock").supports_128bit_int()
+        // self.info.lock().expect("lock").supports_128bit_int()
+        false
     }
 }
 
