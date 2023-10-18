@@ -819,7 +819,9 @@ impl<'a, 'gcc, 'tcx> Builder<'a, 'gcc, 'tcx> {
                 value
             };
 
-        if value_type.is_u128(&self.cx) {
+        // only break apart 128-bit ints if they're not natively supported
+        // TODO(antoyo): remove this if/when native 128-bit integers land in libgccjit
+        if value_type.is_u128(&self.cx) && !self.cx.supports_128bit_integers {
             let sixty_four = self.gcc_int(value_type, 64);
             let right_shift = self.gcc_lshr(value, sixty_four);
             let high = self.gcc_int_cast(right_shift, self.cx.ulonglong_type);
